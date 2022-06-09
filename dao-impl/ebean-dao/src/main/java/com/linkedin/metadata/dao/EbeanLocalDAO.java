@@ -711,7 +711,7 @@ public class EbeanLocalDAO<ASPECT_UNION extends UnionTemplate, URN extends Urn>
    *
    * @param aspectKey Urn needs to do a ignore case match
    */
-  private boolean matchKeys(@Nonnull AspectKey<URN, ? extends RecordTemplate> aspectKey, @Nonnull PrimaryKey pk) {
+  protected boolean matchKeys(@Nonnull AspectKey<URN, ? extends RecordTemplate> aspectKey, @Nonnull PrimaryKey pk) {
     return aspectKey.getUrn().toString().equalsIgnoreCase(pk.getUrn()) && aspectKey.getVersion() == pk.getVersion()
         && ModelUtils.getAspectName(aspectKey.getAspectClass()).equals(pk.getAspect());
   }
@@ -843,7 +843,7 @@ public class EbeanLocalDAO<ASPECT_UNION extends UnionTemplate, URN extends Urn>
   }
 
   @Nonnull
-  private static <ASPECT extends RecordTemplate> Optional<ASPECT> toRecordTemplate(@Nonnull Class<ASPECT> aspectClass,
+  protected static <ASPECT extends RecordTemplate> Optional<ASPECT> toRecordTemplate(@Nonnull Class<ASPECT> aspectClass,
       @Nonnull EbeanMetadataAspect aspect) {
     if (aspect.getMetadata().equals(DELETED_VALUE)) {
       return Optional.empty();
@@ -852,7 +852,7 @@ public class EbeanLocalDAO<ASPECT_UNION extends UnionTemplate, URN extends Urn>
   }
 
   @Nonnull
-  private static <ASPECT extends RecordTemplate> Optional<AspectWithExtraInfo<ASPECT>> toRecordTemplateWithExtraInfo(
+  protected static <ASPECT extends RecordTemplate> Optional<AspectWithExtraInfo<ASPECT>> toRecordTemplateWithExtraInfo(
       @Nonnull Class<ASPECT> aspectClass, @Nonnull EbeanMetadataAspect aspect) {
     if (aspect.getMetadata() == null || aspect.getMetadata().equals(DELETED_VALUE)) {
       return Optional.empty();
@@ -880,7 +880,7 @@ public class EbeanLocalDAO<ASPECT_UNION extends UnionTemplate, URN extends Urn>
   }
 
   @Nonnull
-  private static ExtraInfo toExtraInfo(@Nonnull EbeanMetadataAspect aspect) {
+  protected static ExtraInfo toExtraInfo(@Nonnull EbeanMetadataAspect aspect) {
     final ExtraInfo extraInfo = new ExtraInfo();
     extraInfo.setVersion(aspect.getKey().getVersion());
     extraInfo.setAudit(makeAuditStamp(aspect));
@@ -894,7 +894,7 @@ public class EbeanLocalDAO<ASPECT_UNION extends UnionTemplate, URN extends Urn>
   }
 
   @Nonnull
-  private static AuditStamp makeAuditStamp(@Nonnull EbeanMetadataAspect aspect) {
+  protected static AuditStamp makeAuditStamp(@Nonnull EbeanMetadataAspect aspect) {
     final AuditStamp auditStamp = new AuditStamp();
     auditStamp.setTime(aspect.getCreatedOn().getTime());
 

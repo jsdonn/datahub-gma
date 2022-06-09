@@ -6,14 +6,12 @@ import com.linkedin.common.urn.Urn;
 import com.linkedin.data.template.RecordTemplate;
 import com.linkedin.data.template.UnionTemplate;
 import com.linkedin.metadata.aspect.SoftDeletedAspect;
-import com.linkedin.metadata.dao.exception.ModelConversionException;
 import com.linkedin.metadata.dao.producer.BaseMetadataEventProducer;
 import com.linkedin.metadata.dao.retention.TimeBasedRetention;
 import com.linkedin.metadata.dao.retention.VersionBasedRetention;
 import com.linkedin.metadata.dao.scsi.EmptyPathExtractor;
 import com.linkedin.metadata.dao.scsi.UrnPathExtractor;
 import com.linkedin.metadata.dao.storage.LocalDAOStorageConfig;
-import com.linkedin.metadata.dao.utils.ModelUtils;
 import com.linkedin.metadata.dao.utils.QueryUtils;
 import com.linkedin.metadata.dao.utils.RecordUtils;
 import com.linkedin.metadata.query.ExtraInfo;
@@ -25,7 +23,6 @@ import io.ebean.EbeanServerFactory;
 import io.ebean.SqlUpdate;
 import io.ebean.config.ServerConfig;
 import io.ebean.datasource.DataSourceConfig;
-import java.net.URISyntaxException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -280,7 +277,7 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
     if (latest == null) { // TODO: handle case where latest is not found, not sure if batchGetUnion will return null
       return new AspectEntry<>(null, null);
     }
-    final ExtraInfo extraInfo = toExtraInfo(latest);
+    final ExtraInfo extraInfo = EbeanLocalDAO.toExtraInfo(latest);
 
     if (latest.getMetadata().equals(DELETED_VALUE)) {
       return new AspectEntry<>(null, extraInfo, true);
@@ -391,9 +388,9 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
 
     return keys.stream()
         .collect(Collectors.toMap(Function.identity(), key -> records.stream()
-            .filter(record -> matchKeys(key, record.getKey()))
+            .filter(record -> _ebeanLocalDAO.matchKeys(key, record.getKey()))
             .findFirst()
-            .flatMap(record -> toRecordTemplate(key.getAspectClass(), record))));
+            .flatMap(record -> _ebeanLocalDAO.toRecordTemplate(key.getAspectClass(), record))));
   }
 
   @Override
@@ -409,11 +406,11 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
     final Map<AspectKey<URN, ? extends RecordTemplate>, AspectWithExtraInfo<? extends RecordTemplate>> result =
         new HashMap<>();
     keys.forEach(key -> records.stream()
-        .filter(record -> matchKeys(key, record.getKey()))
+        .filter(record -> _ebeanLocalDAO.matchKeys(key, record.getKey()))
         .findFirst()
         .map(record -> {
           final Class<RecordTemplate> aspectClass = (Class<RecordTemplate>) key.getAspectClass();
-          final Optional<AspectWithExtraInfo<RecordTemplate>> aspectWithExtraInfo = toRecordTemplateWithExtraInfo(aspectClass, record);
+          final Optional<AspectWithExtraInfo<RecordTemplate>> aspectWithExtraInfo = EbeanLocalDAO.toRecordTemplateWithExtraInfo(aspectClass, record);
           aspectWithExtraInfo.ifPresent(
               recordTemplateAspectWithExtraInfo -> result.put(key, recordTemplateAspectWithExtraInfo));
           return null;
@@ -471,16 +468,6 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
       return batchGetUnion(keys, keysCount, position);
   }
 
-  /**
-   * Checks if an {@link AspectKey} and a {@link PrimaryKey} for Ebean are equivalent.
-   *
-   * @param aspectKey Urn needs to do a ignore case match
-   */
-  private boolean matchKeys(@Nonnull AspectKey<URN, ? extends RecordTemplate> aspectKey, @Nonnull PrimaryKey pk) {
-    return aspectKey.getUrn().toString().equalsIgnoreCase(pk.getUrn()) && aspectKey.getVersion() == pk.getVersion()
-        && ModelUtils.getAspectName(aspectKey.getAspectClass()).equals(pk.getAspect());
-  }
-
   @Override
   @Nonnull
   public <ASPECT extends RecordTemplate> ListResult<Long> listVersions(@Nonnull Class<ASPECT> aspectClass,
@@ -514,56 +501,6 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
   public <ASPECT extends RecordTemplate> ListResult<ASPECT> list(@Nonnull Class<ASPECT> aspectClass, int start,
       int pageSize) {
     return _ebeanLocalDAO.list(aspectClass, start, pageSize);
-  }
-
-  @Nonnull
-  private static <ASPECT extends RecordTemplate> Optional<ASPECT> toRecordTemplate(@Nonnull Class<ASPECT> aspectClass,
-      @Nonnull EbeanMetadataAspect aspect) {
-    if (aspect.getMetadata().equals(DELETED_VALUE)) {
-      return Optional.empty();
-    }
-    return Optional.of(RecordUtils.toRecordTemplate(aspectClass, aspect.getMetadata()));
-  }
-
-  @Nonnull
-  private static <ASPECT extends RecordTemplate> Optional<AspectWithExtraInfo<ASPECT>> toRecordTemplateWithExtraInfo(
-      @Nonnull Class<ASPECT> aspectClass, @Nonnull EbeanMetadataAspect aspect) {
-    if (aspect.getMetadata() == null || aspect.getMetadata().equals(DELETED_VALUE)) {
-      return Optional.empty();
-    }
-    final ExtraInfo extraInfo = toExtraInfo(aspect);
-    return Optional.of(new AspectWithExtraInfo<>(RecordUtils.toRecordTemplate(aspectClass, aspect.getMetadata()),
-        extraInfo));
-  }
-
-  @Nonnull
-  private static ExtraInfo toExtraInfo(@Nonnull EbeanMetadataAspect aspect) {
-    final ExtraInfo extraInfo = new ExtraInfo();
-    extraInfo.setVersion(aspect.getKey().getVersion());
-    extraInfo.setAudit(makeAuditStamp(aspect));
-    try {
-      extraInfo.setUrn(Urn.createFromString(aspect.getKey().getUrn()));
-    } catch (URISyntaxException e) {
-      throw new ModelConversionException(e.getMessage());
-    }
-
-    return extraInfo;
-  }
-
-  @Nonnull
-  private static AuditStamp makeAuditStamp(@Nonnull EbeanMetadataAspect aspect) {
-    final AuditStamp auditStamp = new AuditStamp();
-    auditStamp.setTime(aspect.getCreatedOn().getTime());
-
-    try {
-      auditStamp.setActor(new Urn(aspect.getCreatedBy()));
-      if (aspect.getCreatedFor() != null) {
-        auditStamp.setImpersonator(new Urn(aspect.getCreatedFor()));
-      }
-    } catch (URISyntaxException e) {
-      throw new RuntimeException(e);
-    }
-    return auditStamp;
   }
 
   @Override
