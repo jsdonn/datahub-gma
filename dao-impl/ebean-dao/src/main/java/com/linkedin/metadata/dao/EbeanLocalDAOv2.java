@@ -82,7 +82,7 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
     _server = server;
     _urnClass = urnClass;
     _localAccess = new EBeanLocalAccess(server, urnClass);
-    _ebeanLocalDAO = new EbeanLocalDAO<>(aspectUnionClass, producer, server, urnClass); // DON'T SEND DUPLICATE MAES
+    _ebeanLocalDAO = new EbeanLocalDAO<>(aspectUnionClass, producer, server, urnClass);
   }
 
   /**
@@ -106,6 +106,8 @@ public class EbeanLocalDAOv2<ASPECT_UNION extends UnionTemplate, URN extends Urn
     _server = server;
     _urnClass = urnClass;
     _urnPathExtractor = urnPathExtractor;
+    _localAccess = new EBeanLocalAccess<>(server, urnClass);
+    _ebeanLocalDAO = new EbeanLocalDAO<>(producer, server, storageConfig, urnClass, urnPathExtractor);
   }
 
   @VisibleForTesting
