@@ -251,14 +251,12 @@ public class EbeanLocalRelationshipQueryDAO {
       // there's no concept of MG entity or non-entity in old schema mode. always return false.
       return false;
     }
-    // there is some race condition, the local relationship db might not be ready when EbeanLocalRelationshipQueryDAO inits.
-    // so we can't init the _mgEntityTypeNameSet in constructor.
-    if (_mgEntityTypeNameSet == null) {
-      initMgEntityTypeNameSet();
-    }
+
+    initMgEntityTypeNameSet();
 
     return _mgEntityTypeNameSet.contains(StringUtils.lowerCase(entityType));
   }
+
 
   /**
    * Extracts the table name from an entity urn for MG entities. If entityUrn is not for MG entity, return null.
@@ -479,13 +477,20 @@ public class EbeanLocalRelationshipQueryDAO {
   }
 
   /**
-   * Creates a set of MG entity type names by querying the database.
+   * Creates and return a set of MG entity type names by querying the database.
    */
-  private void initMgEntityTypeNameSet() {
-    final String sql = "SELECT table_name FROM information_schema.tables"
-        + " WHERE table_type = 'BASE TABLE' AND TABLE_SCHEMA=DATABASE() AND table_name LIKE 'metadata_entity_%'";
-    _mgEntityTypeNameSet = _server.createSqlQuery(sql).findList().stream()
-        .map(row -> row.getString("table_name").replace("metadata_entity_", ""))
-        .collect(Collectors.toSet());
+  public Set<String> initMgEntityTypeNameSet() {
+    // there is some race condition, the local relationship db might not be ready when EbeanLocalRelationshipQueryDAO inits.
+    // so we can't init the _mgEntityTypeNameSet in constructor.
+    if (_mgEntityTypeNameSet == null) {
+      final String sql = "SELECT table_name FROM information_schema.tables"
+          + " WHERE table_type = 'BASE TABLE' AND TABLE_SCHEMA=DATABASE() AND table_name LIKE 'metadata_entity_%'";
+      _mgEntityTypeNameSet = _server.createSqlQuery(sql)
+          .findList()
+          .stream()
+          .map(row -> row.getString("table_name").replace("metadata_entity_", ""))
+          .collect(Collectors.toSet());
+    }
+    return _mgEntityTypeNameSet;
   }
 }
