@@ -90,6 +90,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -2540,13 +2541,16 @@ public class EbeanLocalDAOTest {
     verifyNoMoreInteractions(_mockProducer);
   }
 
-  @Test
-  public void testRemoveRelationshipsDuringAspectSoftDeletion() throws URISyntaxException {
-    EbeanLocalDAO<EntityAspectUnion, FooUrn> fooDao = createDao(FooUrn.class);
+  // common setup logic to the next two tests for relationship removal
+  private void setupAspectsAndRelationships(
+      FooUrn fooUrn,
+      EbeanLocalDAO<EntityAspectUnion, FooUrn> fooDao) throws URISyntaxException {
+    // necessary flag to prevent removal of existing same-type relationships in "another aspect"
+    fooDao.setUseAspectColumnForRelationshipRemoval(true);
+
     EbeanLocalDAO<EntityAspectUnion, BarUrn> barDao = createDao(BarUrn.class);
 
     // add an aspect (AspectFooBar) which includes BelongsTo relationships and ReportsTo relationships
-    FooUrn fooUrn = makeFooUrn(1);
     BarUrn barUrn1 = BarUrn.createFromString("urn:li:bar:1");
     BelongsToV2 belongsTo1 = new BelongsToV2().setDestination(BelongsToV2.Destination.create(barUrn1.toString()));
     BarUrn barUrn2 = BarUrn.createFromString("urn:li:bar:2");
@@ -2565,6 +2569,23 @@ public class EbeanLocalDAOTest {
     barDao.add(barUrn2, new AspectFoo().setValue("2"), auditStamp);
     barDao.add(barUrn3, new AspectFoo().setValue("3"), auditStamp);
 
+    // add an aspect (AspectFooBaz) which includes BelongsTo relationships
+    BarUrn barUrn4 = BarUrn.createFromString("urn:li:bar:4");
+    BelongsToV2 belongsTo4 = new BelongsToV2().setDestination(BelongsToV2.Destination.create(barUrn4.toString()));
+    BelongsToV2Array belongsToArray2 = new BelongsToV2Array(belongsTo4);
+    AspectFooBaz aspectFooBaz = new AspectFooBaz().setBars(new BarUrnArray(barUrn4)).setBelongsTos(belongsToArray2);
+
+    fooDao.add(fooUrn, aspectFooBaz, auditStamp);
+    barDao.add(barUrn4, new AspectFoo().setValue("4"), auditStamp);
+  }
+
+  @Test
+  public void testRemoveRelationshipsDuringAspectSoftDeletion() throws URISyntaxException {
+    FooUrn fooUrn = makeFooUrn(1);
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> fooDao = createDao(FooUrn.class);
+
+    setupAspectsAndRelationships(fooUrn, fooDao);
+
     // Verify local relationships and entities are added.
     EbeanLocalRelationshipQueryDAO ebeanLocalRelationshipQueryDAO = new EbeanLocalRelationshipQueryDAO(_server);
     ebeanLocalRelationshipQueryDAO.setSchemaConfig(_schemaConfig);
@@ -2573,7 +2594,7 @@ public class EbeanLocalDAOTest {
         ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
             EMPTY_FILTER, BelongsToV2.class, OUTGOING_FILTER, 0, 10);
 
-    assertEquals(resultBelongsTos.size(), 3);
+    assertEquals(resultBelongsTos.size(), 4);
 
     List<ReportsTo> resultReportsTos =
         ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
@@ -2593,6 +2614,104 @@ public class EbeanLocalDAOTest {
     resultBelongsTos = ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
             EMPTY_FILTER, BelongsToV2.class, OUTGOING_FILTER, 0, 10);
 
+    // since we only deleted 1 of the 2 Aspects with BelongsTo relationships, we should still have 1 BelongsTo relationship
+    assertEquals(resultBelongsTos.size(), 1);
+
+    // check that the reportsTo relationship was soft deleted
+    resultReportsTos =
+        ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
+            EMPTY_FILTER, ReportsTo.class, OUTGOING_FILTER, 0, 10);
+
+    assertEquals(resultReportsTos.size(), 0);
+
+    // check that the AspectFooBar aspect was soft deleted
+    Optional<AspectWithExtraInfo<AspectFooBar>> optionalAspect = fooDao.getWithExtraInfo(AspectFooBar.class, fooUrn, 0L);
+    assertFalse(optionalAspect.isPresent());
+  }
+
+  // basically a copy of the above test but makes use of the deleteMany() call
+  @Test
+  public void testDeleteManyWithRelationshipRemoval() throws URISyntaxException {
+    FooUrn fooUrn = makeFooUrn(1);
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> fooDao = createDao(FooUrn.class);
+    // necessary flag to prevent removal of existing same-type relationships in "another aspect"
+    fooDao.setUseAspectColumnForRelationshipRemoval(true);
+
+    EbeanLocalDAO<EntityAspectUnion, BarUrn> barDao = createDao(BarUrn.class);
+
+    // add an aspect (AspectFooBar) which includes BelongsTo relationships and ReportsTo relationships
+    BarUrn barUrn1 = BarUrn.createFromString("urn:li:bar:1");
+    BelongsToV2 belongsTo1 = new BelongsToV2().setDestination(BelongsToV2.Destination.create(barUrn1.toString()));
+    BarUrn barUrn2 = BarUrn.createFromString("urn:li:bar:2");
+    BelongsToV2 belongsTo2 = new BelongsToV2().setDestination(BelongsToV2.Destination.create(barUrn2.toString()));
+    BarUrn barUrn3 = BarUrn.createFromString("urn:li:bar:3");
+    BelongsToV2 belongsTo3 = new BelongsToV2().setDestination(BelongsToV2.Destination.create(barUrn3.toString()));
+    BelongsToV2Array belongsToArray = new BelongsToV2Array(belongsTo1, belongsTo2, belongsTo3);
+    ReportsTo reportsTo = new ReportsTo().setSource(fooUrn).setDestination(barUrn1);
+    ReportsToArray reportsToArray = new ReportsToArray(reportsTo);
+    AspectFooBar aspectFooBar = new AspectFooBar()
+        .setBars(new BarUrnArray(barUrn1, barUrn2, barUrn3)).setBelongsTos(belongsToArray).setReportsTos(reportsToArray);
+    AuditStamp auditStamp = makeAuditStamp("foo", System.currentTimeMillis());
+
+    fooDao.add(fooUrn, aspectFooBar, auditStamp);
+    barDao.add(barUrn1, new AspectFoo().setValue("1"), auditStamp);
+    barDao.add(barUrn2, new AspectFoo().setValue("2"), auditStamp);
+    barDao.add(barUrn3, new AspectFoo().setValue("3"), auditStamp);
+
+    // add an aspect (AspectFooBaz) which includes BelongsTo relationships
+    BarUrn barUrn4 = BarUrn.createFromString("urn:li:bar:4");
+    BelongsToV2 belongsTo4 = new BelongsToV2().setDestination(BelongsToV2.Destination.create(barUrn4.toString()));
+    BelongsToV2Array belongsToArray2 = new BelongsToV2Array(belongsTo4);
+    AspectFooBaz aspectFooBaz = new AspectFooBaz().setBars(new BarUrnArray(barUrn4)).setBelongsTos(belongsToArray2);
+
+    fooDao.add(fooUrn, aspectFooBaz, auditStamp);
+    barDao.add(barUrn4, new AspectFoo().setValue("4"), auditStamp);
+
+    // Verify local relationships and entities are added.
+    EbeanLocalRelationshipQueryDAO ebeanLocalRelationshipQueryDAO = new EbeanLocalRelationshipQueryDAO(_server);
+    ebeanLocalRelationshipQueryDAO.setSchemaConfig(_schemaConfig);
+
+    List<BelongsToV2> resultBelongsTos =
+        ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
+            EMPTY_FILTER, BelongsToV2.class, OUTGOING_FILTER, 0, 10);
+
+    assertEquals(resultBelongsTos.size(), 4);
+
+    List<ReportsTo> resultReportsTos =
+        ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
+            EMPTY_FILTER, ReportsTo.class, OUTGOING_FILTER, 0, 10);
+
+    assertEquals(resultReportsTos.size(), 1);
+
+    AspectKey<FooUrn, AspectFooBar> key = new AspectKey<>(AspectFooBar.class, fooUrn, 0L);
+    List<EbeanMetadataAspect> aspects = fooDao.batchGetHelper(Collections.singletonList(key), 1, 0);
+
+    assertEquals(aspects.size(), 1);
+
+    // soft delete the AspectFooBar and AspectFooBaz aspects
+    Collection<EntityAspectUnion> deletedAspects =
+        fooDao.deleteMany(fooUrn, new HashSet<>(Arrays.asList(AspectFooBar.class, AspectFooBaz.class)), _dummyAuditStamp);
+
+    assertEquals(deletedAspects.size(), 2);
+
+    // check that the AspectFooBar content returned matches the pre-deletion content
+    Optional<EntityAspectUnion> aspectFooBarDeleted = deletedAspects.stream()
+        .filter(EntityAspectUnion::isAspectFooBar)
+        .findFirst();
+    assertTrue(aspectFooBarDeleted.isPresent());
+    assertEquals(aspectFooBarDeleted.get().getAspectFooBar(), aspectFooBar);
+
+    // check that the AspectFooBaz content returned matches the pre-deletion content
+    Optional<EntityAspectUnion> aspectFooBazDeleted = deletedAspects.stream()
+        .filter(EntityAspectUnion::isAspectFooBaz)
+        .findFirst();
+    assertTrue(aspectFooBazDeleted.isPresent());
+    assertEquals(aspectFooBazDeleted.get().getAspectFooBaz(), aspectFooBaz);
+
+    // check that the belongsTo relationships 1, 2, 3, and 4 were soft deleted
+    resultBelongsTos = ebeanLocalRelationshipQueryDAO.findRelationships(FooSnapshot.class, EMPTY_FILTER, BarSnapshot.class,
+        EMPTY_FILTER, BelongsToV2.class, OUTGOING_FILTER, 0, 10);
+
     assertEquals(resultBelongsTos.size(), 0);
 
     // check that the reportsTo relationship was soft deleted
@@ -2605,6 +2724,105 @@ public class EbeanLocalDAOTest {
     // check that the AspectFooBar aspect was soft deleted
     Optional<AspectWithExtraInfo<AspectFooBar>> optionalAspect = fooDao.getWithExtraInfo(AspectFooBar.class, fooUrn, 0L);
     assertFalse(optionalAspect.isPresent());
+
+    // check that the AspectFooBaz aspect was soft deleted
+    Optional<AspectWithExtraInfo<AspectFooBaz>> optionalAspect2 = fooDao.getWithExtraInfo(AspectFooBaz.class, fooUrn, 0L);
+    assertFalse(optionalAspect2.isPresent());
+  }
+
+  @Test
+  public void testDeleteWithReturnOnNonexistentAsset() {
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> dao = createDao(FooUrn.class);
+    FooUrn urn = makeFooUrn(1);
+
+    AspectFoo foo = dao.deleteWithReturn(urn, AspectFoo.class, _dummyAuditStamp, 3, null);
+    assertNull(foo);
+  }
+
+  @Test
+  public void testDeleteWithReturnOnNullAspect() {
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> dao = createDao(FooUrn.class);
+    FooUrn urn = makeFooUrn(1);
+
+    // add aspect so the row exists in the entity table, but the column for other aspects will be empty
+    AspectFoo v0 = new AspectFoo().setValue("foo");
+    dao.add(urn, v0, _dummyAuditStamp);
+
+    // attempt to delete an aspect that doesn't exist
+    AspectBar foo = dao.deleteWithReturn(urn, AspectBar.class, _dummyAuditStamp, 3, null);
+    assertNull(foo);
+  }
+
+  @Test
+  public void testDeleteWithReturnOnAlreadyDeletedAspect() {
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> dao = createDao(FooUrn.class);
+    FooUrn urn = makeFooUrn(1);
+    AspectFoo v0 = new AspectFoo().setValue("foo");
+    dao.add(urn, v0, _dummyAuditStamp);
+    AspectFoo foo = dao.deleteWithReturn(urn, AspectFoo.class, _dummyAuditStamp, 3, null);
+
+    // make sure that the content matches the original
+    assertEquals(foo, v0);
+
+    // attempt to delete an aspect that has already been deleted
+    AspectFoo fooAgain = dao.deleteWithReturn(urn, AspectFoo.class, _dummyAuditStamp, 3, null);
+    assertNull(fooAgain);
+  }
+
+  @Test
+  public void testDeleteManyOnNonexistentAsset() {
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> dao = createDao(FooUrn.class);
+    FooUrn urn = makeFooUrn(1);
+
+    Collection<EntityAspectUnion> deletionResults =
+        dao.deleteMany(urn, new HashSet<>(Collections.singletonList(AspectFoo.class)), _dummyAuditStamp, 3, null);
+
+    // make sure return collection is empty
+    assertEquals(deletionResults.size(), 0);
+  }
+
+  @Test
+  public void testDeleteManyOnNullAspect() {
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> dao = createDao(FooUrn.class);
+    FooUrn urn = makeFooUrn(1);
+
+    // add aspect so the row exists in the entity table, but the column for other aspects will be empty
+    AspectFoo v0 = new AspectFoo().setValue("foo");
+    dao.add(urn, v0, _dummyAuditStamp);
+
+    // attempt to delete an aspect that doesn't exist
+    Collection<EntityAspectUnion> deletionResults =
+        dao.deleteMany(urn, new HashSet<>(Collections.singletonList(AspectBar.class)), _dummyAuditStamp, 3, null);
+
+    // make sure return collection is empty
+    assertEquals(deletionResults.size(), 0);
+  }
+
+  @Test
+  public void testDeleteManyOnAlreadyDeletedAspect() {
+    EbeanLocalDAO<EntityAspectUnion, FooUrn> dao = createDao(FooUrn.class);
+    FooUrn urn = makeFooUrn(1);
+    AspectFoo v0 = new AspectFoo().setValue("foo");
+    dao.add(urn, v0, _dummyAuditStamp);
+
+    // delete the aspect
+    Collection<EntityAspectUnion> deletionResults =
+        dao.deleteMany(urn, new HashSet<>(Collections.singletonList(AspectFoo.class)), _dummyAuditStamp, 3, null);
+    assertEquals(deletionResults.size(), 1);
+
+    // make sure that the content matches the original
+    Optional<EntityAspectUnion> aspectFooDeleted = deletionResults.stream()
+        .filter(EntityAspectUnion::isAspectFoo)
+        .findFirst();
+    assertTrue(aspectFooDeleted.isPresent());
+    assertEquals(aspectFooDeleted.get().getAspectFoo(), v0);
+
+    // attempt to delete an aspect that has already been deleted
+    Collection<EntityAspectUnion> deletionResultsAgain =
+        dao.deleteMany(urn, new HashSet<>(Collections.singletonList(AspectFoo.class)), _dummyAuditStamp, 3, null);
+
+    // make sure return collection is empty
+    assertEquals(deletionResultsAgain.size(), 0);
   }
 
   @Test
