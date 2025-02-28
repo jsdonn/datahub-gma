@@ -437,7 +437,7 @@ public class EbeanLocalRelationshipQueryDAO {
         }
       }
 
-      sqlBuilder.append("WHERE deleted_ts is NULL");
+      sqlBuilder.append("WHERE rt.deleted_ts is NULL");
 
       filters.add(new Pair<>(relationshipFilter, "rt"));
 
@@ -449,7 +449,7 @@ public class EbeanLocalRelationshipQueryDAO {
         sqlBuilder.append(" AND ").append(whereClause);
       }
     } else if (_schemaConfig == EbeanLocalDAO.SchemaConfig.OLD_SCHEMA_ONLY) {
-      sqlBuilder.append("WHERE deleted_ts IS NULL");
+      sqlBuilder.append("WHERE rt.deleted_ts IS NULL");
       if (sourceEntityFilter != null) {
         validateEntityFilterOnlyOneUrn(sourceEntityFilter);
         if (sourceEntityFilter.hasCriteria() && sourceEntityFilter.getCriteria().size() > 0) {
